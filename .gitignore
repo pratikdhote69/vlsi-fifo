@@ -1,0 +1,15 @@
+# Simulation files
+sim/*.vvp
+sim/*.vcd
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+*.swp
