@@ -1,13 +1,16 @@
 `timescale 1ns/1ps
-/**
- * Module: sync_fifo_sva
- * Description: SystemVerilog Assertions for the Synchronous FIFO.
- */
-module sync_fifo_sva #(
+////////////////////////////////////////////////////////////////////////////////
+// Company: VLSI Design Industry Standard
+// Engineer: Principal VLSI Design Engineer
+// 
+// Module Name: fifo_sva
+// Description: SystemVerilog Assertions for formal and dynamic verification.
+////////////////////////////////////////////////////////////////////////////////
+module fifo_sva #(
     parameter int DATA_WIDTH = 8,
-    parameter int DEPTH      = 16,
-    parameter int ALMOST_FULL_VAL  = 12,
-    parameter int ALMOST_EMPTY_VAL = 4
+    parameter int DEPTH = 16,
+    parameter int ALMOST_FULL_VAL = 14,
+    parameter int ALMOST_EMPTY_VAL = 2
 )(
     input  logic                  clk,
     input  logic                  rst_n,
@@ -19,53 +22,58 @@ module sync_fifo_sva #(
     input  logic                  empty,
     input  logic                  almost_full,
     input  logic                  almost_empty,
-    input  logic [$clog2(DEPTH):0] data_count,
-    input  logic [$clog2(DEPTH):0] w_ptr_bin,
-    input  logic [$clog2(DEPTH):0] r_ptr_bin
+    input  logic [$clog2(DEPTH):0] data_count
 );
 
-    // 1. Reset Property: Outputs must be in default state during/immediately after reset
+    // 1. Reset Property: Outputs must be in default state during reset
     property p_reset_state;
-        @(posedge clk) !rst_n |-> (empty == 1'b1 && full == 1'b0 && data_count == '0 && almost_empty == 1'b1 && almost_full == 1'b0);
+        @(posedge clk) !rst_n |-> (empty && !full && !almost_full && almost_empty && (data_count == 0));
     endproperty
     a_reset_state: assert property (p_reset_state);
 
-    // 2. Full Flag Property: Full must be asserted when data_count equals DEPTH
-    property p_full_flag;
+    // 2. FIFO Full No Write: Write pointer/count shouldn't change when full
+    property p_full_no_write;
         @(posedge clk) disable iff (!rst_n)
-        (data_count == DEPTH) |-> full;
+        (full && w_en && !r_en) |=> (full && $stable(data_count));
     endproperty
-    a_full_flag: assert property (p_full_flag);
+    a_full_no_write: assert property (p_full_no_write);
 
-    // 3. Empty Flag Property: Empty must be asserted when data_count is 0
-    property p_empty_flag;
+    // 3. FIFO Empty No Read: Read pointer/count shouldn't change when empty
+    property p_empty_no_read;
         @(posedge clk) disable iff (!rst_n)
-        (data_count == 0) |-> empty;
+        (empty && r_en && !w_en) |=> (empty && $stable(data_count));
     endproperty
-    a_empty_flag: assert property (p_empty_flag);
+    a_empty_no_read: assert property (p_empty_no_read);
 
-    // 4. Overflow Prevention: Write pointer must not change when writing to a full FIFO
-    property p_no_overflow;
+    // 4. FIFO Count Increment
+    property p_count_increment;
         @(posedge clk) disable iff (!rst_n)
-        (full && w_en) |=> ($stable(w_ptr_bin));
+        (w_en && !r_en && !full) |=> (data_count == $past(data_count) + 1'b1);
     endproperty
-    a_no_overflow: assert property (p_no_overflow);
+    a_count_increment: assert property (p_count_increment);
 
-    // 5. Underflow Prevention: Read pointer must not change when reading from an empty FIFO
-    property p_no_underflow;
+    // 5. FIFO Count Decrement
+    property p_count_decrement;
         @(posedge clk) disable iff (!rst_n)
-        (empty && r_en) |=> ($stable(r_ptr_bin));
+        (r_en && !w_en && !empty) |=> (data_count == $past(data_count) - 1'b1);
     endproperty
-    a_no_underflow: assert property (p_no_underflow);
+    a_count_decrement: assert property (p_count_decrement);
 
-    // 6. Almost Full Flag Property: Asserted when data_count >= ALMOST_FULL_VAL
+    // 6. FIFO Count Stable on simultaneous read/write
+    property p_count_stable;
+        @(posedge clk) disable iff (!rst_n)
+        (w_en && r_en && !full && !empty) |=> (data_count == $past(data_count));
+    endproperty
+    a_count_stable: assert property (p_count_stable);
+
+    // 7. Almost Full Flag Assertion
     property p_almost_full;
         @(posedge clk) disable iff (!rst_n)
         (data_count >= ALMOST_FULL_VAL) |-> almost_full;
     endproperty
     a_almost_full: assert property (p_almost_full);
 
-    // 7. Almost Empty Flag Property: Asserted when data_count <= ALMOST_EMPTY_VAL
+    // 8. Almost Empty Flag Assertion
     property p_almost_empty;
         @(posedge clk) disable iff (!rst_n)
         (data_count <= ALMOST_EMPTY_VAL) |-> almost_empty;
@@ -75,17 +83,19 @@ module sync_fifo_sva #(
     // Cover Properties for Key Scenarios
     c_fifo_full: cover property (@(posedge clk) disable iff (!rst_n) full);
     c_fifo_empty: cover property (@(posedge clk) disable iff (!rst_n) empty);
-    c_simultaneous_rw: cover property (@(posedge clk) disable iff (!rst_n) (w_en && r_en && !full && !empty));
+    c_fifo_almost_full: cover property (@(posedge clk) disable iff (!rst_n) almost_full);
+    c_fifo_almost_empty: cover property (@(posedge clk) disable iff (!rst_n) almost_empty);
+    c_simultaneous_rw: cover property (@(posedge clk) disable iff (!rst_n) (w_en && r_en));
 
 endmodule
 
-// Bind statement to attach SVA to the RTL module
-bind sync_fifo sync_fifo_sva #(
+// Bind Statement to attach SVA to the top-level design
+bind fifo_top fifo_sva #(
     .DATA_WIDTH(DATA_WIDTH),
     .DEPTH(DEPTH),
     .ALMOST_FULL_VAL(ALMOST_FULL_VAL),
     .ALMOST_EMPTY_VAL(ALMOST_EMPTY_VAL)
-) u_sync_fifo_sva (
+) u_fifo_sva (
     .clk(clk),
     .rst_n(rst_n),
     .w_en(w_en),
@@ -96,7 +106,5 @@ bind sync_fifo sync_fifo_sva #(
     .empty(empty),
     .almost_full(almost_full),
     .almost_empty(almost_empty),
-    .data_count(data_count),
-    .w_ptr_bin(w_ptr_bin),
-    .r_ptr_bin(r_ptr_bin)
+    .data_count(data_count)
 );

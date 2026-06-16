@@ -1,56 +1,69 @@
-# Synchronous FIFO Project
+# Synchronous FIFO Design Project
 
-This project implements a highly robust, parameterized Synchronous FIFO with First-Word Fall-Through (FWFT) support, complete with SystemVerilog Assertions (SVA) and a self-checking testbench.
+This project implements a highly parameterized, production-ready Synchronous FIFO in SystemVerilog. The design is split into modular components to ensure clean synthesis and ease of verification.
 
 ## Directory Structure
 ```
-├── fifo_mem.sv        # Parameterized dual-port memory block
-├── sync_fifo.sv       # Top-level FIFO controller
-├── sync_fifo_sva.sv   # SystemVerilog Assertions (SVA) bound to RTL
-├── sync_fifo_tb.sv    # Self-checking testbench
-└── README.md          # Project documentation
+├── fifo_mem.sv       # Dual-port synchronous write, combinational read memory
+├── fifo_ctrl.sv      # Pointer generation and status flag logic
+├── fifo_top.sv       # Top-level wrapper module
+├── fifo_tb.sv        # Self-checking testbench with functional coverage
+├── fifo_sva.sv       # SystemVerilog Assertions (SVA) file
+└── sim/              # Simulation output directory (created during run)
 ```
 
 ## How to Run Simulation
 
-### Using Icarus Verilog (v11+)
-To compile and run the simulation using Icarus Verilog, execute the following commands:
+### Prerequisites
+- [Icarus Verilog (iverilog)](http://iverilog.icarus.com/) (v10.0 or newer recommended)
+- GTKWave (for waveform viewing)
+
+### Compilation & Execution Commands
+Run the following commands in your terminal to compile and run the simulation:
 
 ```bash
 # Create simulation directory
 mkdir -p sim
 
-# Compile all source files
-iverilog -g2012 -o sim/fifo_sim fifo_mem.sv sync_fifo.sv sync_fifo_sva.sv sync_fifo_tb.sv
+# Compile all source files and testbench
+iverilog -g2012 -o sim/fifo_sim \
+    fifo_mem.sv \
+    fifo_ctrl.sv \
+    fifo_top.sv \
+    fifo_sva.sv \
+    fifo_tb.sv
 
-# Run simulation
+# Run the simulation
 vvp sim/fifo_sim
 ```
 
 ### Viewing Waveforms
-The simulation generates a VCD waveform file at `sim/waves.vcd`. You can open this file using GTKWave:
+To view the generated waveforms in GTKWave:
 ```bash
-gtkwave sim/waves.vcd
+gtkwave sim/waves.vcd &
 ```
 
 ## Expected Output
-Upon successful execution, the testbench will output:
+Upon successful execution, the terminal will display:
 ```
-[TB] Asserting Reset...
-[TB] Reset De-asserted.
-[TB] TEST CASE 1: Verifying Reset State...
-[TB] TEST CASE 1 PASSED.
-[TB] TEST CASE 2: Single Write and Read...
-[TB] TEST CASE 2 PASSED.
-[TB] TEST CASE 3: Fill to Full and Overflow Prevention...
-[TB] TEST CASE 3 PASSED.
-[TB] TEST CASE 4: Empty to Empty and Underflow Prevention...
-[TB] TEST CASE 4 PASSED.
-[TB] TEST CASE 5: Simultaneous Write and Read...
-[TB] TEST CASE 5 PASSED.
-[TB] All tests completed successfully!
+[TB] --- Test Case 1: Reset Sequence ---
+[TB] PASS: Reset state verified.
+[TB] --- Test Case 2: Single Write and Read ---
+[TB] PASS: Single write successful.
+[TB] PASS: Single read successful.
+[TB] --- Test Case 3: Fill to Full and Overflow Prevention ---
+[TB] PASS: FIFO successfully filled to full.
+[TB] PASS: Overflow prevention verified.
+[TB] --- Test Case 4: Empty to Empty and Underflow Prevention ---
+[TB] PASS: FIFO successfully emptied.
+[TB] PASS: Underflow prevention verified.
+[TB] --- Test Case 5: Simultaneous Write and Read ---
+[TB] FIFO half-full. Starting simultaneous read and write...
+[TB] Simultaneous operations complete. Verifying FIFO stability...
+[TB] PASS: Simultaneous operations verified.
+[TB] All test cases completed successfully!
 ```
 
-## Author and Date
-- **Author**: Principal VLSI Design Verification Engineer
-- **Date**: October 2023
+---
+**Author:** Principal VLSI Design Verification Engineer  
+**Date:** October 2023
