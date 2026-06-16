@@ -1,28 +1,34 @@
 `timescale 1ns/1ps
+/**
+ * Module: fifo_mem
+ * Description: Parameterized dual-port memory with synchronous write
+ *              and combinational read (FWFT support).
+ */
 module fifo_mem #(
     parameter int DATA_WIDTH = 8,
-    parameter int DEPTH      = 16,
     parameter int ADDR_WIDTH = 4
 )(
-    input  logic                    clk,
-    input  logic                    wr_en,
-    input  logic [ADDR_WIDTH-1:0]   wr_addr,
-    input  logic [DATA_WIDTH-1:0]   wr_data,
-    input  logic [ADDR_WIDTH-1:0]   rd_addr,
-    output logic [DATA_WIDTH-1:0]   rd_data
+    input  logic                  clk,
+    input  logic                  w_en,
+    input  logic [ADDR_WIDTH-1:0] w_addr,
+    input  logic [DATA_WIDTH-1:0] w_data,
+    input  logic [ADDR_WIDTH-1:0] r_addr,
+    output logic [DATA_WIDTH-1:0] r_data
 );
 
+    localparam int DEPTH = 1 << ADDR_WIDTH;
+    
     // Memory array declaration
     logic [DATA_WIDTH-1:0] mem [DEPTH-1:0];
 
     // Synchronous write port
     always_ff @(posedge clk) begin
-        if (wr_en) begin
-            mem[wr_addr] <= wr_data;
+        if (w_en) begin
+            mem[w_addr] <= w_data;
         end
     end
 
-    // Asynchronous read port to support First-Word Fall-Through (FWFT)
-    assign rd_data = mem[rd_addr];
+    // Combinational read port (FWFT behavior)
+    assign r_data = mem[r_addr];
 
 endmodule
