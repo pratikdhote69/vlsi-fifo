@@ -1,30 +1,28 @@
 `timescale 1ns/1ps
 module fifo_mem #(
     parameter int DATA_WIDTH = 8,
+    parameter int DEPTH      = 16,
     parameter int ADDR_WIDTH = 4
-) (
-    input  logic                  wclk,
-    input  logic                  wclken,
-    input  logic                  wfull,
-    input  logic [ADDR_WIDTH-1:0] waddr,
-    input  logic [DATA_WIDTH-1:0] wdata,
-    input  logic                  rclk,
-    input  logic                  rclken,
-    input  logic [ADDR_WIDTH-1:0] raddr,
-    output logic [DATA_WIDTH-1:0] rdata
+)(
+    input  logic                    clk,
+    input  logic                    wr_en,
+    input  logic [ADDR_WIDTH-1:0]   wr_addr,
+    input  logic [DATA_WIDTH-1:0]   wr_data,
+    input  logic [ADDR_WIDTH-1:0]   rd_addr,
+    output logic [DATA_WIDTH-1:0]   rd_data
 );
 
-    localparam int DEPTH = 1 << ADDR_WIDTH;
+    // Memory array declaration
     logic [DATA_WIDTH-1:0] mem [DEPTH-1:0];
 
-    // Synchronous write operation
-    always_ff @(posedge wclk) begin
-        if (wclken && !wfull) begin
-            mem[waddr] <= wdata;
+    // Synchronous write port
+    always_ff @(posedge clk) begin
+        if (wr_en) begin
+            mem[wr_addr] <= wr_data;
         end
     end
 
-    // Asynchronous read operation
-    assign rdata = mem[raddr];
+    // Asynchronous read port to support First-Word Fall-Through (FWFT)
+    assign rd_data = mem[rd_addr];
 
 endmodule

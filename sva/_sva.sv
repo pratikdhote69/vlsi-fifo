@@ -1,88 +1,92 @@
 `timescale 1ns/1ps
-
-module async_fifo_sva #(
-    parameter int DATA_WIDTH = 8,
-    parameter int ADDR_WIDTH = 4
-) (
-    input  logic                  wclk,
-    input  logic                  wrst_n,
-    input  logic                  winc,
-    input  logic [DATA_WIDTH-1:0] wdata,
-    input  logic                  wfull,
-    input  logic                  rclk,
-    input  logic                  rrst_n,
-    input  logic                  rinc,
-    input  logic [DATA_WIDTH-1:0] rdata,
-    input  logic                  rempty,
-    input  logic [ADDR_WIDTH:0]   wptr,
-    input  logic [ADDR_WIDTH:0]   rptr
+module fifo_sva #(
+    parameter int DATA_WIDTH       = 8,
+    parameter int DEPTH            = 16,
+    parameter int ALMOST_FULL_VAL  = 14,
+    parameter int ALMOST_EMPTY_VAL = 2,
+    parameter int ADDR_WIDTH       = 4
+)(
+    input  logic                    clk,
+    input  logic                    rst_n,
+    input  logic                    wr_en,
+    input  logic [DATA_WIDTH-1:0]   wr_data,
+    input  logic                    rd_en,
+    input  logic [DATA_WIDTH-1:0]   rd_data,
+    input  logic                    full,
+    input  logic                    empty,
+    input  logic                    almost_full,
+    input  logic                    almost_empty,
+    input  logic [ADDR_WIDTH:0]     word_count
 );
 
-    // 1. Reset Property: Write domain initialization
-    property p_write_reset;
-        @(posedge wclk) !wrst_n |-> (wptr == '0 && wfull == 1'b0);
+    // 1. Reset State Property
+    property p_reset_state;
+        @(posedge clk) !rst_n |-> (word_count == 0 && empty == 1 && full == 0 && almost_empty == 1 && almost_full == 0);
     endproperty
-    a_write_reset: assert property (p_write_reset);
+    assert_reset_state: assert property (p_reset_state) else $error("SVA Error: Reset state mismatch!");
 
-    // 2. Reset Property: Read domain initialization
-    property p_read_reset;
-        @(posedge rclk) !rrst_n |-> (rptr == '0 && rempty == 1'b1);
+    // 2. Full Flag Property
+    property p_full_flag;
+        @(posedge clk) disable iff (!rst_n) (word_count == DEPTH) |-> full;
     endproperty
-    a_read_reset: assert property (p_read_reset);
+    assert_full_flag: assert property (p_full_flag) else $error("SVA Error: Full flag not set when word_count == DEPTH");
 
-    // 3. Write pointer Gray code property: only 1 bit changes at a time
-    property p_wptr_gray;
-        @(posedge wclk) disable iff (!wrst_n)
-        (wptr != $past(wptr)) |-> ($countones(wptr ^ $past(wptr)) == 1);
+    // 3. Empty Flag Property
+    property p_empty_flag;
+        @(posedge clk) disable iff (!rst_n) (word_count == 0) |-> empty;
     endproperty
-    a_wptr_gray: assert property (p_wptr_gray);
+    assert_empty_flag: assert property (p_empty_flag) else $error("SVA Error: Empty flag not set when word_count == 0");
 
-    // 4. Read pointer Gray code property: only 1 bit changes at a time
-    property p_rptr_gray;
-        @(posedge rclk) disable iff (!rrst_n)
-        (rptr != $past(rptr)) |-> ($countones(rptr ^ $past(rptr)) == 1);
+    // 4. Almost Full Flag Property
+    property p_almost_full_flag;
+        @(posedge clk) disable iff (!rst_n) (word_count >= ALMOST_FULL_VAL) |-> almost_full;
     endproperty
-    a_rptr_gray: assert property (p_rptr_gray);
+    assert_almost_full_flag: assert property (p_almost_full_flag) else $error("SVA Error: Almost full flag mismatch");
 
-    // 5. No write pointer increment when full and write is attempted
-    property p_no_wptr_inc_on_full;
-        @(posedge wclk) disable iff (!wrst_n)
-        (wfull && winc) |-> ($stable(wptr));
+    // 5. Almost Empty Flag Property
+    property p_almost_empty_flag;
+        @(posedge clk) disable iff (!rst_n) (word_count <= ALMOST_EMPTY_VAL) |-> almost_empty;
     endproperty
-    a_no_wptr_inc_on_full: assert property (p_no_wptr_inc_on_full);
+    assert_almost_empty_flag: assert property (p_almost_empty_flag) else $error("SVA Error: Almost empty flag mismatch");
 
-    // 6. No read pointer increment when empty and read is attempted
-    property p_no_rptr_inc_on_empty;
-        @(posedge rclk) disable iff (!rrst_n)
-        (rempty && rinc) |-> ($stable(rptr));
+    // 6. Overflow Protection (No write pointer increment on full)
+    property p_no_write_on_full;
+        @(posedge clk) disable iff (!rst_n) (full && wr_en && !rd_en) |=> ($stable(word_count));
     endproperty
-    a_no_rptr_inc_on_empty: assert property (p_no_rptr_inc_on_empty);
+    assert_no_write_on_full: assert property (p_no_write_on_full) else $error("SVA Error: Word count changed on write to full FIFO");
 
-    // Coverages
-    c_fifo_full: cover property (@(posedge wclk) disable iff (!wrst_n) wfull);
-    c_fifo_empty: cover property (@(posedge rclk) disable iff (!rrst_n) rempty);
-    c_simultaneous_wr_rd: cover property (
-        @(posedge wclk) disable iff (!wrst_n) (winc && !wfull) ##0
-        @(posedge rclk) disable iff (!rrst_n) (rinc && !rempty)
-    );
+    // 7. Underflow Protection (No read pointer increment on empty)
+    property p_no_read_on_empty;
+        @(posedge clk) disable iff (!rst_n) (empty && rd_en && !wr_en) |=> ($stable(word_count));
+    endproperty
+    assert_no_read_on_empty: assert property (p_no_read_on_empty) else $error("SVA Error: Word count changed on read from empty FIFO");
+
+    // Cover Properties for Key Scenarios
+    cover_fifo_full: cover property (@(posedge clk) disable iff (!rst_n) full);
+    cover_fifo_empty: cover property (@(posedge clk) disable iff (!rst_n) empty);
+    cover_fifo_almost_full: cover property (@(posedge clk) disable iff (!rst_n) almost_full);
+    cover_fifo_almost_empty: cover property (@(posedge clk) disable iff (!rst_n) almost_empty);
+    cover_simultaneous_rw: cover property (@(posedge clk) disable iff (!rst_n) (wr_en && rd_en && !full && !empty));
 
 endmodule
 
-// Bind statement to attach SVA to the top-level RTL
-bind async_fifo async_fifo_sva #(
+// Bind statement to attach SVA to the top-level module
+bind fifo_top fifo_sva #(
     .DATA_WIDTH(DATA_WIDTH),
+    .DEPTH(DEPTH),
+    .ALMOST_FULL_VAL(ALMOST_FULL_VAL),
+    .ALMOST_EMPTY_VAL(ALMOST_EMPTY_VAL),
     .ADDR_WIDTH(ADDR_WIDTH)
-) i_async_fifo_sva (
-    .wclk(wclk),
-    .wrst_n(wrst_n),
-    .winc(winc),
-    .wdata(wdata),
-    .wfull(wfull),
-    .rclk(rclk),
-    .rrst_n(rrst_n),
-    .rinc(rinc),
-    .rdata(rdata),
-    .rempty(rempty),
-    .wptr(wptr),
-    .rptr(rptr)
+) u_fifo_sva_bind (
+    .clk(clk),
+    .rst_n(rst_n),
+    .wr_en(wr_en),
+    .wr_data(wr_data),
+    .rd_en(rd_en),
+    .rd_data(rd_data),
+    .full(full),
+    .empty(empty),
+    .almost_full(almost_full),
+    .almost_empty(almost_empty),
+    .word_count(word_count)
 );

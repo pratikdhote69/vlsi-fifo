@@ -1,77 +1,82 @@
-# Design Specification: Parameterized Asynchronous FIFO
+# Synchronous FIFO Design Specification
 
-## 1. Module Name and Description
-* **Module Name**: `async_fifo`
-* **Description**: A high-performance, parameterized, dual-clock (asynchronous) FIFO designed for safe multi-bit data transfer between asynchronous clock domains. It utilizes Gray-coded pointers to prevent metastability during clock domain crossing (CDC) and implements a 2-stage synchronizer chain for pointer synchronization.
+## 1. Module Overview
+The `fifo_top` module is a high-performance, parameterizable, synchronous First-In, First-Out (FIFO) memory buffer designed for modern VLSI systems. It utilizes a First-Word Fall-Through (FWFT) architecture to achieve zero-latency reads, making it ideal for high-throughput data paths.
+
+To ensure clean physical synthesis, modularity, and ease of verification, the design is split into three distinct modules:
+1. **`fifo_mem`**: The storage array (SRAM/Register file emulator).
+2. **`fifo_ctrl`**: The pointer management and status flag generation logic.
+3. **`fifo_top`**: The top-level wrapper that integrates the memory and control logic, applying safety gating to prevent data corruption.
+
+---
 
 ## 2. Port List
 
-### Write Clock Domain
-| Port Name | Direction | Width | Description |
-| :--- | :--- | :--- | :--- |
-| `wclk` | Input | 1 | Write clock domain clock signal |
-| `wrst_n` | Input | 1 | Active-low asynchronous reset synchronized to `wclk` |
-| `winc` | Input | 1 | Write increment / write enable |
-| `wdata` | Input | `DATA_WIDTH` | Data payload to be written into the FIFO |
-| `wfull` | Output | 1 | Write full flag (asserted when FIFO is full) |
+### `fifo_top` (Top-Level Module)
 
-### Read Clock Domain
 | Port Name | Direction | Width | Description |
 | :--- | :--- | :--- | :--- |
-| `rclk` | Input | 1 | Read clock domain clock signal |
-| `rrst_n` | Input | 1 | Active-low asynchronous reset synchronized to `rclk` |
-| `rinc` | Input | 1 | Read increment / read enable |
-| `rdata` | Output | `DATA_WIDTH` | Data payload read from the FIFO |
-| `rempty` | Output | 1 | Read empty flag (asserted when FIFO is empty) |
+| `clk` | Input | 1 | System clock (rising-edge active) |
+| `rst_n` | Input | 1 | Asynchronous active-low reset |
+| `wr_en` | Input | 1 | Write enable |
+| `wr_data` | Input | `[DATA_WIDTH-1:0]` | Write data bus |
+| `rd_en` | Input | 1 | Read enable |
+| `rd_data` | Output | `[DATA_WIDTH-1:0]` | Read data bus (FWFT style) |
+| `full` | Output | 1 | FIFO full flag |
+| `empty` | Output | 1 | FIFO empty flag |
+| `almost_full` | Output | 1 | FIFO almost full flag |
+| `almost_empty`| Output | 1 | FIFO almost empty flag |
+| `word_count` | Output | `[ADDR_WIDTH:0]` | Current number of valid words in the FIFO |
+
+---
 
 ## 3. Functional Description
-The Asynchronous FIFO is split into distinct functional blocks to ensure clean synthesis, timing closure, and ease of verification. 
 
-* **Dual-Port Memory (`fifo_mem`)**: An array of size $2^{\text{ADDR\_WIDTH}} \times \text{DATA\_WIDTH}$. Writing is synchronous to `wclk` when `winc` is asserted and `wfull` is low. Reading is asynchronous (combinational) based on the binary read address `raddr` to allow immediate data availability on the read port.
-* **Pointer Synchronizers (`sync_ptr`)**: Two-stage D-Flip-Flop synchronizers used to pass the Gray-coded pointers across the clock domains (`wptr` to `rclk` domain, and `rptr` to `wclk` domain).
-* **Write Pointer & Full Logic (`wptr_full`)**: Maintains the binary and Gray-coded write pointers. It generates the `wfull` flag by comparing the next write pointer (Gray) with the synchronized read pointer.
-* **Read Pointer & Empty Logic (`rptr_empty`)**: Maintains the binary and Gray-coded read pointers. It generates the `rempty` flag by comparing the next read pointer (Gray) with the synchronized write pointer.
+### 3.1 First-Word Fall-Through (FWFT) Behavior
+Unlike standard FIFOs where data is only available on the cycle after `rd_en` is asserted, this FWFT FIFO makes the oldest unread data immediately available on `rd_data` as soon as it is written. 
+- When the FIFO is empty and a write occurs, the data "falls through" to the output on the next clock cycle.
+- Asserting `rd_en` advances the internal read pointer to the next data word.
 
-### Gray Code Pointer Comparison for Full/Empty
-* **Empty Condition**: The FIFO is empty when the read pointer (Gray) equals the synchronized write pointer (Gray).
-  $$\text{rempty\_val} = (\text{rptr\_next} == \text{rq2\_wptr})$$
-* **Full Condition**: The FIFO is full when the write pointer (Gray) meets the synchronized read pointer (Gray) with the MSB and MSB-1 inverted, and all other bits matching.
-  $$\text{wfull\_val} = (\text{wptr\_next} == \{\sim\text{wq2\_rptr}[\text{ADDR\_WIDTH}:\text{ADDR\_WIDTH}-1], \text{wq2\_rptr}[\text{ADDR\_WIDTH}-2:0]\})$$
+### 3.2 Pointer and Flag Logic
+The design uses binary pointers of width `ADDR_WIDTH + 1` (where `ADDR_WIDTH = $clog2(DEPTH)`). The extra MSB is used to distinguish between "Full" and "Empty" states when the pointers wrap around:
+- **Empty**: `wr_ptr == rd_ptr`
+- **Full**: `wr_ptr[ADDR_WIDTH] != rd_ptr[ADDR_WIDTH]` AND `wr_ptr[ADDR_WIDTH-1:0] == rd_ptr[ADDR_WIDTH-1:0]`
+- **Word Count**: Calculated as `wr_ptr - rd_ptr`. This subtraction naturally handles wrap-around conditions for power-of-2 depths.
+
+### 3.3 Safety Gating
+To prevent memory corruption and pointer desynchronization:
+- Write operations are internally gated with `!full`.
+- Read operations are internally gated with `!empty`.
+
+---
 
 ## 4. Timing Diagram (ASCII)
 
-### Write Operation (wclk domain)
-```text
-             __    __    __    __    __    __    __    __
-wclk      __/  \__/  \__/  \__/  \__/  \__/  \__/  \__/  \__
-             _________________
-winc      __/                 \_____________________________
-          XX  D0   X  D1   X
-wdata     XX_______X_______X________________________________
-                               _____________________________
-wfull     ____________________/
+```
+Clock         :   __||__||__||__||__||__||__||__||__||__||__||__||__||__
+rst_n         :   ____/=================================================
+wr_en         :   ______/=================\_____________________________
+wr_data       :   ______X  D0  X  D1  X  D2  X_____________________________
+rd_en         :   ________________________/=================\___________
+rd_data       :   ________________________X  D0  X  D1  X  D2  X___________
+empty         :   ======\___________________________________/===========
+full          :   ______________________________________________________
+word_count    :   000000X   1  X   2  X   3  X   2  X   1  X   0  X000000
 ```
 
-### Read Operation (rclk domain)
-```text
-             __    __    __    __    __    __    __    __
-rclk      __/  \__/  \__/  \__/  \__/  \__/  \__/  \__/  \__
-                         _________________
-rinc      ______________/                 \_________________
-          ______________________
-rempty                          \___________________________
-                                X  D0   X  D1   X
-rdata     ----------------------X_______X_______X-----------
-```
+---
 
 ## 5. File Breakdown
-* `sync_ptr.sv`: Generic 2-stage DFF synchronizer.
-* `fifo_mem.sv`: Dual-port memory array.
-* `wptr_full.sv`: Write pointer generation and full flag logic.
-* `rptr_empty.sv`: Read pointer generation and empty flag logic.
-* `async_fifo.sv`: Top-level wrapper instantiating all sub-modules.
+
+| Filename | Module Name | Purpose |
+| :--- | :--- | :--- |
+| `fifo_mem.sv` | `fifo_mem` | Dual-port memory array with synchronous write and asynchronous read. |
+| `fifo_ctrl.sv` | `fifo_ctrl` | Pointer tracking, word counter, and status flag generation. |
+| `fifo_top.sv` | `fifo_top` | Top-level integration and safety gating. |
+
+---
 
 ## 6. Key Design Decisions
-1. **Gray Coding**: Pointers are converted to Gray code before crossing clock domains. Since Gray code only changes by 1 bit per transition, it eliminates multi-bit CDC race conditions and prevents false full/empty flag assertions.
-2. **Asynchronous Reset**: Asynchronous active-low resets are used to ensure the FIFO can be initialized reliably without requiring active clocks.
-3. **Combinational Memory Read**: Reading from the memory array is combinational, allowing the read data to be available immediately when `rinc` is asserted, minimizing latency.
+1. **Power-of-2 Depth Constraint**: Enforcing `DEPTH` to be a power of 2 allows the use of standard binary pointer subtraction for `word_count` calculation, eliminating complex gray-code or modulo counters.
+2. **Asynchronous Reset**: Active-low asynchronous reset (`rst_n`) is utilized to match industry-standard ASIC/FPGA cell libraries.
+3. **Gated Memory Writes**: Gating `wr_en` with `!full` at the top level ensures that even if the external driver violates protocol and asserts `wr_en` while full, the internal memory remains uncorrupted.

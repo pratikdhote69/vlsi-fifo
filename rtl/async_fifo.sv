@@ -1,4 +1,5 @@
 `timescale 1ns/1ps
+
 module async_fifo #(
     parameter int DATA_WIDTH = 8,
     parameter int ADDR_WIDTH = 4
@@ -45,20 +46,19 @@ module async_fifo #(
     );
 
     // Dual-Port FIFO Memory
-    fifo_mem #(
-        .DATA_WIDTH(DATA_WIDTH),
-        .ADDR_WIDTH(ADDR_WIDTH)
-    ) mem_inst (
-        .wclk  (wclk),
-        .wclken(winc),
-        .wfull (wfull),
-        .waddr (waddr),
-        .wdata (wdata),
-        .rclk  (rclk),
-        .rclken(rinc),
-        .raddr (raddr),
-        .rdata (rdata)
-    );
+    // Implemented directly within the module to resolve external port mismatches
+    // and ensure robust synthesis/simulation across all toolchains.
+    localparam int DEPTH = 1 << ADDR_WIDTH;
+    logic [DATA_WIDTH-1:0] mem [DEPTH-1:0];
+
+    always_ff @(posedge wclk) begin
+        if (winc && !wfull) begin
+            mem[waddr] <= wdata;
+        end
+    end
+
+    // Asynchronous read (standard for low-latency asynchronous FIFOs)
+    assign rdata = mem[raddr];
 
     // Read pointer and empty flag logic
     rptr_empty #(
