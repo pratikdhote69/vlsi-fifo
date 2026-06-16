@@ -1,5 +1,8 @@
 # Synchronous FIFO Design Project
 
+![CI Status](https://github.com/pratikdhote69/vlsi-fifo/actions/workflows/ci.yml/badge.svg)
+
+
 This project implements a highly parameterized, production-ready Synchronous FIFO in SystemVerilog. The design is split into modular components to ensure clean synthesis and ease of verification.
 
 ## Directory Structure
